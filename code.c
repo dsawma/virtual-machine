@@ -10,8 +10,6 @@
 #include <sys/mman.h>
 #include "code.h"
 
-
-
 void disable_input_buffering()
 {
     tcgetattr(STDIN_FILENO, &original_tio);
@@ -36,7 +34,42 @@ uint16_t check_key()
     timeout.tv_usec = 0;
     return select(1, &readfds, NULL, NULL, &timeout) != 0;
 }
+uint16_t swap16(uint16_t x)
+{
+    return (x << 8) | (x >> 8);
+}
 
+int read_image(const char *image_path)
+{
+    FILE *file = fopen(image_path, "rb");
+    if (file)
+    {
+        read_image_file(file);
+        fclose(file);
+        return 1;
+    }
+    else
+    {
+        return 0;
+    }
+}
+
+void read_image_file(FILE *file)
+{
+    /* origin is the first 16 bits of program file; specifys the address in memory where program should start*/
+    uint16_t origin;
+    fread(&origin, sizeof(origin), 1, file);
+    origin = swap16(origin);
+
+    uint16_t max_read = MEMORY_MAX - origin;
+    uint16_t *p = memory + origin;
+    size_t read = fread(p, sizeof(uint16_t), max_read, file);
+    while (read-- > 0)
+    {
+        *p = swap16(*p);
+        ++p;
+    }
+}
 
 void mem_write(uint16_t address, uint16_t val)
 {
@@ -58,6 +91,38 @@ uint16_t mem_read(uint16_t address)
     }
     return memory[address];
 }
+void handle_interrupt(int signal)
+{
+    restore_input_buffering();
+    printf("\n");
+    exit(-2);
+}
+uint16_t sign_extend(uint16_t x, int bit_count)
+{
+    if ((x >> (bit_count - 1)) & 1)
+    {
+        x |= (0xFFFF << bit_count); /* x | 1111 1111 1110 0000*/
+    }
+    return x;
+}
+
+void update_flags(uint16_t r)
+{
+    if (reg[r] == 0)
+    {
+        reg[R_COND] = FL_ZRO;
+    }
+    else if (reg[r] >> 15)
+    {
+        reg[R_COND] = FL_NEG;
+    }
+    else
+    {
+        reg[R_COND] = FL_POS;
+    }
+}
+
+
 
 int main(int argc, const char *argv[])
 {
@@ -133,12 +198,12 @@ int main(int argc, const char *argv[])
             uint16_t r0 = (instr >> 9) & 0x7;
             uint16_t r1 = (instr >> 6) & 0x7;
 
-            reg[r0] = !reg[r1];
+            reg[r0] = ~reg[r1];
             update_flags(r0);
             break;
         case OP_BR:
             uint16_t offset = sign_extend(instr & 0x1FF, 9);
-            uint16_t cond_flag = (instr >> 0) & 0x7;
+            uint16_t cond_flag = (instr >> 9) & 0x7;
             if (cond_flag & reg[R_COND])
             {
                 reg[R_PC] += offset;
@@ -156,7 +221,7 @@ int main(int argc, const char *argv[])
             if (flag)
             {
                 uint16_t pc_offset = sign_extend(instr & 0x7FF, 11);
-                reg[R_PC] += (1 + pc_offset);
+                reg[R_PC] += pc_offset;
             }
             else
             {
@@ -267,71 +332,4 @@ int main(int argc, const char *argv[])
         }
     }
     restore_input_buffering();
-}
-void handle_interrupt(int signal)
-{
-    restore_input_buffering();
-    printf("\n");
-    exit(-2);
-}
-uint16_t sign_extend(uint16_t x, int bit_count)
-{
-    if ((x >> (bit_count - 1)) & 1)
-    {
-        x |= (0xFFFF << bit_count); /* x | 1111 1111 1110 0000*/
-    }
-    return x;
-}
-
-void update_flags(uint16_t r)
-{
-    if (reg[r] == 0)
-    {
-        reg[R_COND] = FL_ZRO;
-    }
-    else if (reg[r] >> 15)
-    {
-        reg[R_COND] = FL_NEG;
-    }
-    else
-    {
-        reg[R_COND] = FL_POS;
-    }
-}
-
-uint16_t swap16(uint16_t x)
-{
-    return (x << 8) | (x >> 8);
-}
-
-int read_image(const char *image_path)
-{
-    FILE *file = fopen(image_path, "rb");
-    if (file)
-    {
-        read_image_file(file);
-        fclose(file);
-        return 1;
-    }
-    else
-    {
-        return 0;
-    }
-}
-
-void read_image_file(FILE *file)
-{
-    /* origin is the first 16 bits of program file; specifys the address in memory where program should start*/
-    uint16_t origin;
-    fread(&origin, sizeof(origin), 1, file);
-    origin = swap16(origin);
-
-    uint16_t max_read = MEMORY_MAX - origin;
-    uint16_t *p = memory + origin;
-    size_t read = fread(p, sizeof(uint16_t), max_read, file);
-    while (read-- > 0)
-    {
-        *p = swap16(*p);
-        ++p;
-    }
 }
