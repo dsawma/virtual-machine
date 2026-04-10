@@ -327,7 +327,7 @@ int main(int argc, const char *argv[])
         case OP_RES:
         case OP_RTI:
         default:
-            abort(); /* unimplemented */
+            abort();
             break;
         }
     }
